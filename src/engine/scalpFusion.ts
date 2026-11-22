@@ -1,4 +1,6 @@
 import {
+  AlertLogEntry,
+  AlertOutcome,
   BreakoutLevelItem,
   CandleBar,
   ComputedBar,
@@ -843,3 +845,94 @@ export function formatPrice(price: number | null | undefined, symbol = ''): stri
   if (price >= 10) return price.toFixed(3);
   return price.toFixed(5);
 }
+
+export function evaluateAlertOutcome(
+  alert: Pick<AlertLogEntry, 'type' | 'price' | 'atr' | 'barTime'>,
+  bars: ComputedBar[]
+): { outcome: AlertOutcome; diff: number; pct: number; reason: string } {
+  if (bars.length === 0 || alert.price <= 0) {
+    return { outcome: 'PENDING', diff: 0, pct: 0, reason: 'En attente de bougie' };
+  }
+
+  const isBull =
+    alert.type === 'ACHAT' || alert.type === 'CASSURE_RES' || alert.type === 'STC_VERT';
+  const sigIdx = bars.findIndex((b) => b.time === alert.barTime);
+  const baseAtr =
+    alert.atr && alert.atr > 0
+      ? alert.atr
+      : sigIdx >= 0 && bars[sigIdx].atr > 0
+      ? bars[sigIdx].atr
+      : alert.price * 0.0005;
+
+  const sub = bars.filter((b) => b.time > alert.barTime).slice(0, 12);
+  if (sub.length === 0) {
+    return { outcome: 'PENDING', diff: 0, pct: 0, reason: 'En attente' };
+  }
+
+  const tp = isBull ? alert.price + baseAtr : alert.price - baseAtr;
+  const sl = isBull ? alert.price - baseAtr : alert.price + baseAtr;
+
+  for (let i = 0; i < Math.min(sub.length, 10); i++) {
+    const b = sub[i];
+    if (isBull) {
+      if (b.low <= sl) {
+        const diff = sl - alert.price;
+        return {
+          outcome: 'LOSS',
+          diff,
+          pct: (diff / alert.price) * 100,
+          reason: `SL (-1×ATR, B${i + 1})`,
+        };
+      }
+      if (b.high >= tp) {
+        const diff = tp - alert.price;
+        return {
+          outcome: 'WIN',
+          diff,
+          pct: (diff / alert.price) * 100,
+          reason: `TP (+1×ATR, B${i + 1})`,
+        };
+      }
+    } else {
+      if (b.high >= sl) {
+        const diff = alert.price - sl;
+        return {
+          outcome: 'LOSS',
+          diff,
+          pct: (diff / alert.price) * 100,
+          reason: `SL (-1×ATR, B${i + 1})`,
+        };
+      }
+      if (b.low <= tp) {
+        const diff = alert.price - tp;
+        return {
+          outcome: 'WIN',
+          diff,
+          pct: (diff / alert.price) * 100,
+          reason: `TP (+1×ATR, B${i + 1})`,
+        };
+      }
+    }
+  }
+
+  if (sub.length >= 10 && !sub[9].isForming) {
+    const refClose = sub[9].close;
+    const diff = isBull ? refClose - alert.price : alert.price - refClose;
+    return {
+      outcome: diff >= 0 ? 'WIN' : 'LOSS',
+      diff,
+      pct: (diff / alert.price) * 100,
+      reason: 'Clôture 10 bougies',
+    };
+  }
+
+  const latestClose = sub[sub.length - 1].close;
+  const diff = isBull ? latestClose - alert.price : alert.price - latestClose;
+  return {
+    outcome: 'PENDING',
+    diff,
+    pct: (diff / alert.price) * 100,
+    reason: `${sub.length}/10 bougies`,
+  };
+}
+

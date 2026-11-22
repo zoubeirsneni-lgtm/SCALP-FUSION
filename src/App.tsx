@@ -8,6 +8,7 @@ import { ScannerView } from './components/ScannerView';
 import { WorkspaceToolbar } from './components/WorkspaceToolbar';
 import {
   computeScalpFusion,
+  evaluateAlertOutcome,
   parseMt5Csv,
   resolveEffectiveParams,
 } from './engine/scalpFusion';
@@ -31,6 +32,7 @@ const STORAGE_KEYS = {
   SETTINGS: 'scalp_fusion_settings_v1',
   BRIDGE_URL: 'scalp_fusion_bridge_url_v1',
   DARK_MODE: 'scalp_fusion_dark_v1',
+  ALERTS: 'scalp_fusion_alerts_v1',
 };
 
 const DEFAULT_PAIRS = ['EURUSDm', 'GBPUSDm', 'USDJPYm', 'XAUUSDm', 'BTCUSDm'];
@@ -246,13 +248,25 @@ export default function App() {
 
   const [feeds, setFeeds] = useState<Record<string, PairFeedState>>({});
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [alerts, setAlerts] = useState<AlertLogEntry[]>([]);
+  const [alerts, setAlerts] = useState<AlertLogEntry[]>(() =>
+    loadJson<AlertLogEntry[]>(STORAGE_KEYS.ALERTS, [])
+  );
 
   const csvInputRef = useRef<HTMLInputElement | null>(null);
   const csvTargetSymbolRef = useRef<string | null>(null);
   const csvStoreRef = useRef<Record<string, CandleBar[]>>({});
-  const seenAlertIdsRef = useRef<Set<string>>(new Set());
+  const seenAlertIdsRef = useRef<Set<string>>(
+    new Set(loadJson<AlertLogEntry[]>(STORAGE_KEYS.ALERTS, []).map((a) => a.id))
+  );
   const initialLoadDoneRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.ALERTS, JSON.stringify(alerts.slice(0, 200)));
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [alerts]);
 
   // Sync Tailwind dark class
   useEffect(() => {
@@ -341,21 +355,41 @@ export default function App() {
       const recentWindow = bars.slice(-15);
       const newEntries: AlertLogEntry[] = [];
 
+      const buildEntry = (
+        id: string,
+        type: AlertLogEntry['type'],
+        b: (typeof bars)[number],
+        message: string
+      ): AlertLogEntry => {
+        const ev = evaluateAlertOutcome(
+          { type, price: b.close, atr: b.atr, barTime: b.time },
+          bars
+        );
+        return {
+          id,
+          symbol,
+          timeframe: tf,
+          type,
+          price: b.close,
+          atr: b.atr,
+          barTime: b.time,
+          message,
+          source,
+          outcome: ev.outcome,
+          outcomeDiff: ev.diff,
+          outcomePct: ev.pct,
+          outcomeReason: ev.reason,
+        };
+      };
+
       for (const b of recentWindow) {
         if (b.finalBuySig) {
           const id = `${symbol}_${tf}_${b.time}_ACHAT`;
           if (!seenAlertIdsRef.current.has(id)) {
             seenAlertIdsRef.current.add(id);
-            newEntries.push({
-              id,
-              symbol,
-              timeframe: tf,
-              type: 'ACHAT',
-              price: b.close,
-              barTime: b.time,
-              message: `Signal SCALP FUSION ACHAT (UT Stop ${b.utStop.toFixed(5)})`,
-              source,
-            });
+            newEntries.push(
+              buildEntry(id, 'ACHAT', b, `Signal SCALP FUSION ACHAT (UT Stop ${b.utStop.toFixed(5)})`)
+            );
             if (!isInitial && soundEnabled && b.time === bars[bars.length - 1].time) {
               playSignalChime('ACHAT');
             }
@@ -365,16 +399,9 @@ export default function App() {
           const id = `${symbol}_${tf}_${b.time}_VENTE`;
           if (!seenAlertIdsRef.current.has(id)) {
             seenAlertIdsRef.current.add(id);
-            newEntries.push({
-              id,
-              symbol,
-              timeframe: tf,
-              type: 'VENTE',
-              price: b.close,
-              barTime: b.time,
-              message: `Signal SCALP FUSION VENTE (UT Stop ${b.utStop.toFixed(5)})`,
-              source,
-            });
+            newEntries.push(
+              buildEntry(id, 'VENTE', b, `Signal SCALP FUSION VENTE (UT Stop ${b.utStop.toFixed(5)})`)
+            );
             if (!isInitial && soundEnabled && b.time === bars[bars.length - 1].time) {
               playSignalChime('VENTE');
             }
@@ -384,76 +411,83 @@ export default function App() {
           const id = `${symbol}_${tf}_${b.time}_CRES`;
           if (!seenAlertIdsRef.current.has(id)) {
             seenAlertIdsRef.current.add(id);
-            newEntries.push({
-              id,
-              symbol,
-              timeframe: tf,
-              type: 'CASSURE_RES',
-              price: b.close,
-              barTime: b.time,
-              message: 'Cassure haussière de résistance S/R',
-              source,
-            });
+            newEntries.push(
+              buildEntry(id, 'CASSURE_RES', b, 'Cassure haussière de résistance S/R')
+            );
           }
         }
         if (b.breakDn) {
           const id = `${symbol}_${tf}_${b.time}_CSUP`;
           if (!seenAlertIdsRef.current.has(id)) {
             seenAlertIdsRef.current.add(id);
-            newEntries.push({
-              id,
-              symbol,
-              timeframe: tf,
-              type: 'CASSURE_SUP',
-              price: b.close,
-              barTime: b.time,
-              message: 'Cassure baissière de support S/R',
-              source,
-            });
+            newEntries.push(
+              buildEntry(id, 'CASSURE_SUP', b, 'Cassure baissière de support S/R')
+            );
           }
         }
         if (b.stcAlertGreen && !b.isForming) {
           const id = `${symbol}_${tf}_${b.time}_STC_G`;
           if (!seenAlertIdsRef.current.has(id)) {
             seenAlertIdsRef.current.add(id);
-            newEntries.push({
-              id,
-              symbol,
-              timeframe: tf,
-              type: 'STC_VERT',
-              price: b.close,
-              barTime: b.time,
-              message: `STC Vert : retournement haussier sous 25 (${b.stc.toFixed(1)})`,
-              source,
-            });
+            newEntries.push(
+              buildEntry(
+                id,
+                'STC_VERT',
+                b,
+                `STC Vert : retournement haussier sous 25 (${b.stc.toFixed(1)})`
+              )
+            );
           }
         }
         if (b.stcAlertRed && !b.isForming) {
           const id = `${symbol}_${tf}_${b.time}_STC_R`;
           if (!seenAlertIdsRef.current.has(id)) {
             seenAlertIdsRef.current.add(id);
-            newEntries.push({
-              id,
-              symbol,
-              timeframe: tf,
-              type: 'STC_ROUGE',
-              price: b.close,
-              barTime: b.time,
-              message: `STC Rouge : retournement baissier > 75 (${b.stc.toFixed(1)})`,
-              source,
-            });
+            newEntries.push(
+              buildEntry(
+                id,
+                'STC_ROUGE',
+                b,
+                `STC Rouge : retournement baissier > 75 (${b.stc.toFixed(1)})`
+              )
+            );
           }
         }
       }
 
       initialLoadDoneRef.current.add(key);
-      if (newEntries.length > 0) {
-        setAlerts((prev) =>
-          [...newEntries, ...prev]
-            .sort((a, b) => b.barTime - a.barTime)
-            .slice(0, 200)
-        );
-      }
+      setAlerts((prev) => {
+        let changed = newEntries.length > 0;
+        const updatedPrev = prev.map((existing) => {
+          if (
+            existing.symbol === symbol &&
+            existing.timeframe === tf &&
+            existing.outcome !== 'WIN' &&
+            existing.outcome !== 'LOSS'
+          ) {
+            const ev = evaluateAlertOutcome(existing, bars);
+            if (
+              ev.outcome !== existing.outcome ||
+              ev.reason !== existing.outcomeReason ||
+              ev.diff !== existing.outcomeDiff
+            ) {
+              changed = true;
+              return {
+                ...existing,
+                outcome: ev.outcome,
+                outcomeDiff: ev.diff,
+                outcomePct: ev.pct,
+                outcomeReason: ev.reason,
+              };
+            }
+          }
+          return existing;
+        });
+        if (!changed) return prev;
+        return [...newEntries, ...updatedPrev]
+          .sort((a, b) => b.barTime - a.barTime)
+          .slice(0, 200);
+      });
     },
     [soundEnabled]
   );
@@ -882,7 +916,10 @@ export default function App() {
             alerts={alerts}
             soundEnabled={soundEnabled}
             onToggleSound={() => setSoundEnabled((v) => !v)}
-            onClearAlerts={() => setAlerts([])}
+            onClearAlerts={() => {
+              seenAlertIdsRef.current.clear();
+              setAlerts([]);
+            }}
             onOpenChart={(sym) => {
               setSelectedSymbol(sym);
               setActiveTab('chart');

@@ -298,15 +298,22 @@ export interface PairFeedState {
   updatedAt: number;
 }
 
+export type AlertOutcome = 'WIN' | 'LOSS' | 'PENDING';
+
 export interface AlertLogEntry {
   id: string;
   symbol: string;
   timeframe: Timeframe;
   type: 'ACHAT' | 'VENTE' | 'CASSURE_RES' | 'CASSURE_SUP' | 'VETO' | 'STC_VERT' | 'STC_ROUGE';
   price: number;
+  atr?: number;
   barTime: number;
   message: string;
   source: string;
+  outcome?: AlertOutcome;
+  outcomeDiff?: number;
+  outcomePct?: number;
+  outcomeReason?: string;
 }
 
 export interface Mt5HealthInfo {

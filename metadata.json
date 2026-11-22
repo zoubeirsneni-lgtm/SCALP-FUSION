@@ -1,0 +1,6 @@
+{
+  "name": "SCALP FUSION — MT5 Exness Dashboard",
+  "description": "Tableau de bord multi-paires et multi-timeframes (30s à 15M) basé sur SCALP FUSION v1.1 pour MetaTrader 5 Exness avec pont Python local.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

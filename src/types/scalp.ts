@@ -78,6 +78,14 @@ export interface ScalpFusionSettings {
   boHide0: boolean;
   boShowPanel: boolean;
   useBoFilter: boolean;
+
+  // 8. Schaff Trend Cycle (STC)
+  showSTC: boolean;
+  stcLength: number;
+  stcFastLength: number;
+  stcSlowLength: number;
+  stcFactor: number;
+  showSTCAlerts: boolean;
 }
 
 export const DEFAULT_SETTINGS: ScalpFusionSettings = {
@@ -135,6 +143,13 @@ export const DEFAULT_SETTINGS: ScalpFusionSettings = {
   boHide0: true,
   boShowPanel: false,
   useBoFilter: false,
+
+  showSTC: true,
+  stcLength: 12,
+  stcFastLength: 26,
+  stcSlowLength: 50,
+  stcFactor: 0.5,
+  showSTCAlerts: true,
 };
 
 export interface CandleBar {
@@ -219,6 +234,10 @@ export interface ComputedBar {
   finalBuySig: boolean;
   finalSellSig: boolean;
   vetoBlocked: 'VETO_RES' | 'VETO_SUP' | null;
+  stc: number;
+  stcBull: boolean;
+  stcAlertRed: boolean;
+  stcAlertGreen: boolean;
 }
 
 export interface BreakoutLevelItem {
@@ -283,7 +302,7 @@ export interface AlertLogEntry {
   id: string;
   symbol: string;
   timeframe: Timeframe;
-  type: 'ACHAT' | 'VENTE' | 'CASSURE_RES' | 'CASSURE_SUP' | 'VETO';
+  type: 'ACHAT' | 'VENTE' | 'CASSURE_RES' | 'CASSURE_SUP' | 'VETO' | 'STC_VERT' | 'STC_ROUGE';
   price: number;
   barTime: number;
   message: string;

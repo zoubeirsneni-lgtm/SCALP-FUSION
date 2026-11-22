@@ -39,6 +39,8 @@ export function ChartView({
 }: ChartViewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const stcCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const stcContainerRef = useRef<HTMLDivElement | null>(null);
 
   const [showSettingsDrawer, setShowSettingsDrawer] = useState(true);
   const [visibleCount, setVisibleCount] = useState(110);
@@ -169,7 +171,10 @@ export function ChartView({
     maxP += span * 0.06;
     const priceSpan = maxP - minP;
 
-    const barStep = plotW / slice.length;
+    const rightMarginPx =
+      panOffset === 0 ? Math.min(72, Math.max(40, Math.round(plotW * 0.075))) : 16;
+    const candlesPlotW = Math.max(80, plotW - rightMarginPx);
+    const barStep = candlesPlotW / slice.length;
     const candleW = Math.max(2, Math.min(14, Math.floor(barStep * 0.68)));
     const xAt = (localIdx: number) => padLeft + (localIdx + 0.5) * barStep;
     const yAt = (price: number) => padTop + ((maxP - price) / priceSpan) * plotH;
@@ -625,6 +630,150 @@ export function ChartView({
     timeframe,
   ]);
 
+  // Draw [SHK] Schaff Trend Cycle (STC) Sub-Pane
+  useEffect(() => {
+    if (!settings.showSTC) return;
+    const canvas = stcCanvasRef.current;
+    const container = stcContainerRef.current;
+    if (!canvas || !container) return;
+
+    const rect = container.getBoundingClientRect();
+    const width = Math.max(320, Math.floor(rect.width));
+    const height = Math.max(120, Math.floor(rect.height));
+    const dpr = window.devicePixelRatio || 1;
+
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    ctx.fillStyle = darkMode ? '#0D131D' : '#FFFFFF';
+    ctx.fillRect(0, 0, width, height);
+
+    if (bars.length === 0) return;
+
+    const padLeft = 12;
+    const padRight = 76;
+    const padTop = 12;
+    const padBottom = 14;
+    const plotW = Math.max(100, width - padLeft - padRight);
+    const plotH = Math.max(60, height - padTop - padBottom);
+
+    const endIdx = Math.max(1, bars.length - panOffset);
+    const startIdx = Math.max(0, endIdx - visibleCount);
+    const slice = bars.slice(startIdx, endIdx);
+    if (slice.length === 0) return;
+
+    const rightMarginPx =
+      panOffset === 0 ? Math.min(72, Math.max(40, Math.round(plotW * 0.075))) : 16;
+    const candlesPlotW = Math.max(80, plotW - rightMarginPx);
+    const barStep = candlesPlotW / slice.length;
+    const xAt = (localIdx: number) => padLeft + (localIdx + 0.5) * barStep;
+    const yAtVal = (v: number) => {
+      const clamped = Math.max(-5, Math.min(105, v));
+      return padTop + ((105 - clamped) / 110) * plotH;
+    };
+
+    // Shaded zone 25..75 (fill(ul, ll, color.new(color.gray, 96)))
+    const y75 = yAtVal(75);
+    const y25 = yAtVal(25);
+    ctx.fillStyle = darkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(100, 116, 139, 0.08)';
+    ctx.fillRect(padLeft, y75, width - padLeft - padRight, y25 - y75);
+
+    // Horizontal levels 25 & 75 + axis labels 100, 75, 25, 0
+    ctx.font = '10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'left';
+    for (const lv of [100, 75, 25, 0]) {
+      const y = Math.round(yAtVal(lv)) + 0.5;
+      ctx.strokeStyle =
+        lv === 75 || lv === 25
+          ? darkMode
+            ? 'rgba(148, 163, 184, 0.32)'
+            : 'rgba(100, 116, 139, 0.35)'
+          : darkMode
+          ? 'rgba(148, 163, 184, 0.08)'
+          : 'rgba(15, 23, 42, 0.06)';
+      ctx.lineWidth = 1;
+      if (lv === 75 || lv === 25) ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(padLeft, y);
+      ctx.lineTo(width - padRight, y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.fillStyle = darkMode ? '#94A3B8' : '#64748B';
+      ctx.fillText(String(lv), width - padRight + 8, y + 3);
+    }
+
+    // STC colored curve (green when rising, red when falling)
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    for (let i = 1; i < slice.length; i++) {
+      const prev = slice[i - 1];
+      const curr = slice[i];
+      ctx.strokeStyle = curr.stcBull ? 'rgba(34, 197, 94, 0.88)' : 'rgba(239, 68, 68, 0.88)';
+      ctx.beginPath();
+      ctx.moveTo(xAt(i - 1), yAtVal(prev.stc));
+      ctx.lineTo(xAt(i), yAtVal(curr.stc));
+      ctx.stroke();
+    }
+
+    // STC Alerts (< 25 turn up = Green, > 75 turn down = Red)
+    if (settings.showSTCAlerts) {
+      for (let i = 0; i < slice.length; i++) {
+        const b = slice[i];
+        const x = xAt(i);
+        const y = yAtVal(b.stc);
+        if (b.stcAlertGreen) {
+          ctx.fillStyle = '#22C55E';
+          ctx.beginPath();
+          ctx.arc(x, y, 3.8, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = darkMode ? '#0D131D' : '#FFFFFF';
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+        }
+        if (b.stcAlertRed) {
+          ctx.fillStyle = '#EF4444';
+          ctx.beginPath();
+          ctx.arc(x, y, 3.8, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = darkMode ? '#0D131D' : '#FFFFFF';
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Current STC Badge on right axis
+    const lastStc = slice[slice.length - 1];
+    const lastStcY = Math.round(yAtVal(lastStc.stc)) + 0.5;
+    ctx.fillStyle = lastStc.stcBull ? '#16A34A' : '#DC2626';
+    ctx.fillRect(width - padRight + 2, lastStcY - 8, padRight - 10, 16);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(lastStc.stc.toFixed(1), width - padRight + 7, lastStcY + 3.5);
+
+    // Synchronized crosshair
+    if (hoverIdx !== null && hoverIdx >= 0 && hoverIdx < slice.length) {
+      const cx = xAt(hoverIdx);
+      ctx.strokeStyle = darkMode ? 'rgba(226, 232, 240, 0.35)' : 'rgba(15, 23, 42, 0.3)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(cx, padTop);
+      ctx.lineTo(cx, padTop + plotH);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }, [bars, settings.showSTC, settings.showSTCAlerts, visibleCount, panOffset, hoverIdx, darkMode]);
+
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     const delta = e.deltaY > 0 ? 12 : -12;
@@ -644,19 +793,23 @@ export function ChartView({
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
 
+    const plotW = Math.max(100, rect.width - 88);
+    const rightMarginPx =
+      panOffset === 0 ? Math.min(72, Math.max(40, Math.round(plotW * 0.075))) : 16;
+    const candlesPlotW = Math.max(80, plotW - rightMarginPx);
+    const shownCount = Math.max(1, Math.min(visibleCount, bars.length - panOffset));
+
     if (dragState.current.dragging) {
       const dx = e.clientX - dragState.current.startX;
-      const plotW = Math.max(100, rect.width - 88);
-      const barsPerPx = visibleCount / plotW;
+      const barsPerPx = shownCount / candlesPlotW;
       const nextPan = Math.round(dragState.current.startPan + dx * barsPerPx);
       setPanOffset(Math.max(0, Math.min(Math.max(0, bars.length - 20), nextPan)));
       return;
     }
 
     const x = e.clientX - rect.left;
-    const plotW = Math.max(100, rect.width - 88);
-    const localIdx = Math.floor(((x - 12) / plotW) * Math.min(visibleCount, bars.length));
-    setHoverIdx(localIdx);
+    const localIdx = Math.floor(((x - 12) / candlesPlotW) * shownCount);
+    setHoverIdx(localIdx >= 0 && localIdx < shownCount ? localIdx : null);
   };
 
   const handleMouseUp = () => {
@@ -800,20 +953,91 @@ export function ChartView({
               Chargement des bougies {selectedSymbol} ({timeframe})...
             </div>
           ) : (
-            <div ref={containerRef} className="w-full h-[520px] relative select-none">
-              <canvas
-                ref={canvasRef}
-                onWheel={handleWheel}
-                onMouseDown={handleMouseDown}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
-                onMouseLeave={() => {
-                  handleMouseUp();
-                  setHoverIdx(null);
-                }}
-                className="w-full h-full block cursor-crosshair"
-              />
-            </div>
+            <>
+              <div
+                ref={containerRef}
+                className={`w-full ${settings.showSTC ? 'h-[430px]' : 'h-[520px]'} relative select-none`}
+              >
+                <canvas
+                  ref={canvasRef}
+                  onWheel={handleWheel}
+                  onMouseDown={handleMouseDown}
+                  onMouseMove={handleMouseMove}
+                  onMouseUp={handleMouseUp}
+                  onMouseLeave={() => {
+                    handleMouseUp();
+                    setHoverIdx(null);
+                  }}
+                  className="w-full h-full block cursor-crosshair"
+                />
+              </div>
+
+              {settings.showSTC && (
+                <div className="border-t border-slate-200 dark:border-slate-800">
+                  {(() => {
+                    const endIdx = Math.max(1, bars.length - panOffset);
+                    const startIdx = Math.max(0, endIdx - visibleCount);
+                    const slice = bars.slice(startIdx, endIdx);
+                    const targetBar =
+                      hoverIdx !== null && hoverIdx >= 0 && hoverIdx < slice.length
+                        ? slice[hoverIdx]
+                        : slice[slice.length - 1];
+                    return (
+                      <div className="px-4 py-1.5 flex items-center justify-between text-[11px] bg-slate-50/60 dark:bg-[#0B1018]/60 border-b border-slate-200/70 dark:border-slate-800/70">
+                        <div className="flex items-center gap-3 font-mono tabular-nums">
+                          <span className="font-semibold text-slate-700 dark:text-slate-300">
+                            STC ({settings.stcLength}, {settings.stcFastLength}, {settings.stcSlowLength})
+                          </span>
+                          {targetBar && (
+                            <span
+                              className={`font-semibold ${
+                                targetBar.stcBull
+                                  ? 'text-emerald-600 dark:text-emerald-400'
+                                  : 'text-rose-600 dark:text-rose-400'
+                              }`}
+                            >
+                              {targetBar.stc.toFixed(2)} ·{' '}
+                              {targetBar.stcBull ? 'Haussier' : 'Baissier'}
+                            </span>
+                          )}
+                          {targetBar?.stcAlertGreen && (
+                            <span className="font-sans font-semibold text-emerald-600 dark:text-emerald-400">
+                              ● Signal Vert (&lt;25)
+                            </span>
+                          )}
+                          {targetBar?.stcAlertRed && (
+                            <span className="font-sans font-semibold text-rose-600 dark:text-rose-400">
+                              ● Signal Rouge (&gt;75)
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => onUpdateSettings({ showSTC: false })}
+                          className="text-[11px] text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                        >
+                          Masquer STC
+                        </button>
+                      </div>
+                    );
+                  })()}
+                  <div ref={stcContainerRef} className="w-full h-[145px] relative select-none">
+                    <canvas
+                      ref={stcCanvasRef}
+                      onWheel={handleWheel}
+                      onMouseDown={handleMouseDown}
+                      onMouseMove={handleMouseMove}
+                      onMouseUp={handleMouseUp}
+                      onMouseLeave={() => {
+                        handleMouseUp();
+                        setHoverIdx(null);
+                      }}
+                      className="w-full h-full block cursor-crosshair"
+                    />
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           {/* Légende visuelle interactive (cliquer pour activer/désactiver) */}
@@ -915,6 +1139,18 @@ export function ChartView({
                 <span className="w-2.5 h-0.5 border-b border-dashed border-amber-500 inline-block" />
                 <span>Breakout</span>
               </button>
+              <button
+                type="button"
+                onClick={() => onUpdateSettings({ showSTC: !settings.showSTC })}
+                className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border transition-colors cursor-pointer ${
+                  settings.showSTC
+                    ? 'border-emerald-500/40 bg-emerald-500/10 text-slate-700 dark:text-slate-200 font-medium'
+                    : 'border-slate-200 dark:border-slate-800 text-slate-400 line-through opacity-70'
+                }`}
+              >
+                <span className="w-2.5 h-0.5 bg-gradient-to-r from-emerald-500 to-rose-500 inline-block" />
+                <span>STC ({settings.stcLength}/{settings.stcFastLength}/{settings.stcSlowLength})</span>
+              </button>
             </div>
             <span className="text-[11px] text-slate-400 whitespace-nowrap">
               Molette : Zoom · Glisser : Historique
@@ -962,6 +1198,8 @@ export function ChartView({
                       showFinalSignals: true,
                       showBO: true,
                       boShowPanel: true,
+                      showSTC: true,
+                      showSTCAlerts: true,
                     })
                   }
                   className="h-7 px-2 text-[11px] font-medium rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer"
@@ -990,6 +1228,8 @@ export function ChartView({
                       showBO: false,
                       boFillOn: false,
                       boShowPanel: false,
+                      showSTC: false,
+                      showSTCAlerts: false,
                     })
                   }
                   className="h-7 px-2 text-[11px] font-medium rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer"
@@ -1567,6 +1807,85 @@ export function ChartView({
                   className="accent-blue-600"
                 />
               </label>
+            </div>
+
+            {/* 8. Schaff Trend Cycle (STC) */}
+            <div className="space-y-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+              <div className="font-semibold text-slate-800 dark:text-slate-200">
+                8. Schaff Trend Cycle (STC)
+              </div>
+              <label className="flex items-center justify-between">
+                <span className="text-slate-600 dark:text-slate-400">Afficher STC sous graphique</span>
+                <input
+                  type="checkbox"
+                  checked={settings.showSTC}
+                  onChange={(e) => onUpdateSettings({ showSTC: e.target.checked })}
+                  className="accent-blue-600"
+                />
+              </label>
+              <label className="flex items-center justify-between">
+                <span className="text-slate-600 dark:text-slate-400">Points alertes (25 / 75)</span>
+                <input
+                  type="checkbox"
+                  checked={settings.showSTCAlerts}
+                  onChange={(e) => onUpdateSettings({ showSTCAlerts: e.target.checked })}
+                  className="accent-blue-600"
+                />
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="space-y-1">
+                  <span className="text-slate-500">Length</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={settings.stcLength}
+                    onChange={(e) =>
+                      onUpdateSettings({ stcLength: Math.max(1, Number(e.target.value)) })
+                    }
+                    className="w-full h-7 px-2 font-mono rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-slate-500">Factor (AAA)</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0.1"
+                    max="1"
+                    value={settings.stcFactor}
+                    onChange={(e) =>
+                      onUpdateSettings({
+                        stcFactor: Math.max(0.05, Math.min(1, Number(e.target.value))),
+                      })
+                    }
+                    className="w-full h-7 px-2 font-mono rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-slate-500">FastLength</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={settings.stcFastLength}
+                    onChange={(e) =>
+                      onUpdateSettings({ stcFastLength: Math.max(1, Number(e.target.value)) })
+                    }
+                    className="w-full h-7 px-2 font-mono rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-slate-500">SlowLength</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={settings.stcSlowLength}
+                    onChange={(e) =>
+                      onUpdateSettings({ stcSlowLength: Math.max(1, Number(e.target.value)) })
+                    }
+                    className="w-full h-7 px-2 font-mono rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900"
+                  />
+                </label>
+              </div>
             </div>
           </aside>
         )}

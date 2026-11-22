@@ -537,6 +537,69 @@ export function computeScalpFusion(
     }
   }
 
+  // 8. SCHAFF TREND CYCLE ([SHK] STC)
+  const stcLen = Math.max(1, Math.round(settings.stcLength || 12));
+  const stcFast = Math.max(1, Math.round(settings.stcFastLength || 26));
+  const stcSlow = Math.max(1, Math.round(settings.stcSlowLength || 50));
+  const stcAlpha = settings.stcFactor > 0 ? settings.stcFactor : 0.5;
+
+  const stcFastMA = ema(closes, stcFast);
+  const stcSlowMA = ema(closes, stcSlow);
+  const stcMacd = new Array<number>(n);
+  for (let i = 0; i < n; i++) {
+    stcMacd[i] = stcFastMA[i] - stcSlowMA[i];
+  }
+
+  const stcDdd = new Array<number>(n).fill(0);
+  const stcVals = new Array<number>(n).fill(0);
+  const stcBull = new Array<boolean>(n).fill(false);
+  const stcAlertRed = new Array<boolean>(n).fill(false);
+  const stcAlertGreen = new Array<boolean>(n).fill(false);
+
+  let stcPfPrev = 0;
+  let stcPffPrev = 0;
+
+  for (let i = 0; i < n; i++) {
+    const startW = Math.max(0, i - stcLen + 1);
+    let minM = Infinity;
+    let maxM = -Infinity;
+    for (let j = startW; j <= i; j++) {
+      if (stcMacd[j] < minM) minM = stcMacd[j];
+      if (stcMacd[j] > maxM) maxM = stcMacd[j];
+    }
+    const rangeM = maxM - minM;
+    const pf = rangeM > 0 ? ((stcMacd[i] - minM) / rangeM) * 100 : stcPfPrev;
+    stcPfPrev = pf;
+
+    const ddd = i === 0 ? pf : stcDdd[i - 1] + stcAlpha * (pf - stcDdd[i - 1]);
+    stcDdd[i] = ddd;
+
+    let minD = Infinity;
+    let maxD = -Infinity;
+    for (let j = startW; j <= i; j++) {
+      if (stcDdd[j] < minD) minD = stcDdd[j];
+      if (stcDdd[j] > maxD) maxD = stcDdd[j];
+    }
+    const rangeD = maxD - minD;
+    const pff = rangeD > 0 ? ((ddd - minD) / rangeD) * 100 : stcPffPrev;
+    stcPffPrev = pff;
+
+    const stcVal = i === 0 ? pff : stcVals[i - 1] + stcAlpha * (pff - stcVals[i - 1]);
+    stcVals[i] = stcVal;
+    stcBull[i] = i > 0 ? stcVal > stcVals[i - 1] : false;
+
+    if (i >= 3) {
+      stcAlertRed[i] =
+        stcVals[i - 3] <= stcVals[i - 2] &&
+        stcVals[i - 2] > stcVals[i - 1] &&
+        stcVal > 75;
+      stcAlertGreen[i] =
+        stcVals[i - 3] >= stcVals[i - 2] &&
+        stcVals[i - 2] < stcVals[i - 1] &&
+        stcVal < 25;
+    }
+  }
+
   // 6. SIGNAL FINAL
   const needN = settings.confMode === 'Stricte (2 filtres)' ? 2 : 1;
   const noFilt = settings.confMode === 'UT Bot seul';
@@ -629,6 +692,10 @@ export function computeScalpFusion(
       finalBuySig,
       finalSellSig,
       vetoBlocked,
+      stc: stcVals[i],
+      stcBull: stcBull[i],
+      stcAlertRed: stcAlertRed[i],
+      stcAlertGreen: stcAlertGreen[i],
     });
   }
 

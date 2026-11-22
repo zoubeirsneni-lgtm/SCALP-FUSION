@@ -412,6 +412,38 @@ export default function App() {
             });
           }
         }
+        if (b.stcAlertGreen && !b.isForming) {
+          const id = `${symbol}_${tf}_${b.time}_STC_G`;
+          if (!seenAlertIdsRef.current.has(id)) {
+            seenAlertIdsRef.current.add(id);
+            newEntries.push({
+              id,
+              symbol,
+              timeframe: tf,
+              type: 'STC_VERT',
+              price: b.close,
+              barTime: b.time,
+              message: `STC Vert : retournement haussier sous 25 (${b.stc.toFixed(1)})`,
+              source,
+            });
+          }
+        }
+        if (b.stcAlertRed && !b.isForming) {
+          const id = `${symbol}_${tf}_${b.time}_STC_R`;
+          if (!seenAlertIdsRef.current.has(id)) {
+            seenAlertIdsRef.current.add(id);
+            newEntries.push({
+              id,
+              symbol,
+              timeframe: tf,
+              type: 'STC_ROUGE',
+              price: b.close,
+              barTime: b.time,
+              message: `STC Rouge : retournement baissier > 75 (${b.stc.toFixed(1)})`,
+              source,
+            });
+          }
+        }
       }
 
       initialLoadDoneRef.current.add(key);
@@ -529,9 +561,9 @@ export default function App() {
             symbols: pairs,
             timeframe,
             count: 450,
-            settings,
+            includeComputed: false,
           }),
-          signal: AbortSignal.timeout(10000),
+          signal: AbortSignal.timeout(25000),
         });
 
         const updates: Record<string, PairFeedState> = {};
@@ -569,7 +601,7 @@ export default function App() {
         setIsRefreshing(false);
         return;
       } catch (err) {
-        if (dataSource === 'mt5') {
+        if (dataSource === 'mt5' || timeframe === '30s') {
           const msg = err instanceof Error ? err.message : 'Pont MT5 inaccessible';
           setFeeds((prev) => {
             const next = { ...prev };
@@ -579,7 +611,7 @@ export default function App() {
                 resolvedSymbol: sym,
                 timeframe,
                 loading: false,
-                error: `Pont MT5 local inaccessible (${msg})`,
+                error: `Erreur pont MT5 local en ${timeframe} : ${msg}`,
                 source: 'MT5 Exness Local',
                 candles: [],
                 computed: null,
@@ -592,6 +624,11 @@ export default function App() {
           return;
         }
       }
+    }
+
+    if (mt5Health === null && timeframe === '30s' && dataSource === 'auto') {
+      setIsRefreshing(false);
+      return;
     }
 
     // Public market proxy (/api/market/candles) or CSV override
@@ -700,7 +737,7 @@ export default function App() {
     pairs,
     timeframe,
     dataSource,
-    mt5Health?.mt5Connected,
+    mt5Health,
     cleanBridgeBase,
     settings,
     processPairAlerts,

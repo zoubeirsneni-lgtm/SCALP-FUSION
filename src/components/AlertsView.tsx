@@ -18,11 +18,12 @@ export function AlertsView({
   onClearAlerts,
   onOpenChart,
 }: AlertsViewProps) {
-  const [typeFilter, setTypeFilter] = useState<'ALL' | 'SIGNALS' | 'BREAKS'>('ALL');
+  const [typeFilter, setTypeFilter] = useState<'ALL' | 'SIGNALS' | 'BREAKS' | 'STC'>('ALL');
 
   const filtered = alerts.filter((a) => {
     if (typeFilter === 'SIGNALS') return a.type === 'ACHAT' || a.type === 'VENTE';
     if (typeFilter === 'BREAKS') return a.type === 'CASSURE_RES' || a.type === 'CASSURE_SUP';
+    if (typeFilter === 'STC') return a.type === 'STC_VERT' || a.type === 'STC_ROUGE';
     return true;
   });
 
@@ -57,6 +58,7 @@ export function AlertsView({
               { id: 'ALL', label: 'Toutes' },
               { id: 'SIGNALS', label: 'Signaux Achat/Vente' },
               { id: 'BREAKS', label: 'Cassures S/R' },
+              { id: 'STC', label: 'Alertes STC' },
             ] as const
           ).map((opt) => (
             <button
@@ -154,7 +156,7 @@ export function AlertsView({
                     </td>
                     <td
                       className={`py-2 px-3 font-semibold whitespace-nowrap ${
-                        a.type === 'ACHAT' || a.type === 'CASSURE_RES'
+                        a.type === 'ACHAT' || a.type === 'CASSURE_RES' || a.type === 'STC_VERT'
                           ? 'text-emerald-600 dark:text-emerald-400'
                           : a.type === 'VETO'
                           ? 'text-amber-600 dark:text-amber-400'

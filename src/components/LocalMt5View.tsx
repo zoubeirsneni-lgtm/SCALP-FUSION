@@ -32,8 +32,36 @@ export function LocalMt5View({
   const [selectedFile, setSelectedFile] = useState(PYTHON_PACK_FILES[0].name);
   const [copiedName, setCopiedName] = useState<string | null>(null);
   const [symbolSearch, setSymbolSearch] = useState('');
+  const [downloadingBundle, setDownloadingBundle] = useState(false);
+  const [downloadNote, setDownloadNote] = useState<string | null>(null);
 
-  const handleDownloadZip = () => {
+  const handleDownloadZip = async () => {
+    setDownloadingBundle(true);
+    setDownloadNote(null);
+    try {
+      const res = await fetch('/api/local-bundle.zip', {
+        signal: AbortSignal.timeout(45000),
+      });
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (res.ok && ct.includes('application/zip')) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'scalp_fusion_pc_local.zip';
+        link.click();
+        URL.revokeObjectURL(url);
+        setDownloadNote(
+          'Pack complet téléchargé (Tableau de bord + Pont Python MT5 Exness). Décompressez-le puis double-cliquez sur install_and_run.bat.'
+        );
+        return;
+      }
+    } catch {
+      // Fallback client-side ZIP
+    } finally {
+      setDownloadingBundle(false);
+    }
+
     const blob = buildZipBlob(
       PYTHON_PACK_FILES.map((f) => ({
         name: `scalp_fusion_mt5_local/${f.name}`,
@@ -46,6 +74,9 @@ export function LocalMt5View({
     link.download = 'scalp_fusion_mt5_exness_python.zip';
     link.click();
     URL.revokeObjectURL(url);
+    setDownloadNote(
+      'Pack Python téléchargé. Lancez install_and_run.bat sur votre PC avec MT5 Exness ouvert.'
+    );
   };
 
   const handleCopy = async (name: string, content: string) => {
@@ -64,27 +95,65 @@ export function LocalMt5View({
 
   return (
     <div className="space-y-6">
-      {/* Bloc 1 : Connexion au pont Python MT5 Exness */}
+      {/* Bloc 1 : Installation complète sur PC Windows + Connexion MT5 Exness */}
       <section className="rounded-xl bg-white dark:bg-[#121924] border border-slate-200 dark:border-slate-800 p-5 space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 className="text-base font-display font-semibold text-slate-900 dark:text-slate-100">
-              Connexion locale MetaTrader 5 (Exness)
+              Installer sur votre PC en local (Tableau de bord + MT5 Exness)
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-2xl">
-              Exécutez le script Python local sur votre PC Windows avec MT5 Exness ouvert. Le pont lit directement vos bougies M1/M3/M5/M10/M15 et agrège les ticks en bougies 30s en temps réel.
+              Téléchargez le pack complet prêt à l’emploi : il contient toute l’interface SCALP FUSION v1.1 ainsi que le pont Python local pour MetaTrader 5 Exness (bougies 1M/3M/5M/10M/15M + ticks 30s temps réel).
             </p>
           </div>
 
           <button
             type="button"
-            onClick={handleDownloadZip}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            onClick={() => void handleDownloadZip()}
+            disabled={downloadingBundle}
+            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             <Download className="w-4 h-4" aria-hidden="true" />
-            <span>Télécharger le pack Python (.zip)</span>
+            <span>
+              {downloadingBundle
+                ? 'Préparation du pack (.zip)...'
+                : 'Télécharger le Pack Complet PC (.zip)'}
+            </span>
           </button>
         </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs pt-1">
+          <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800">
+            <div className="font-semibold text-slate-900 dark:text-slate-100">
+              1. Décompresser le ZIP
+            </div>
+            <p className="text-slate-500 dark:text-slate-400 mt-1">
+              Extrayez l’archive dans un dossier sur votre PC (ex : <span className="font-mono">C:\SCALP_FUSION</span>). Prérequis : Python 3.10+ (64-bit) avec <span className="font-mono">Add to PATH</span>.
+            </p>
+          </div>
+          <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800">
+            <div className="font-semibold text-slate-900 dark:text-slate-100">
+              2. Ouvrir MT5 Exness
+            </div>
+            <p className="text-slate-500 dark:text-slate-400 mt-1">
+              Lancez votre terminal MetaTrader 5 Exness et assurez-vous d’être connecté à votre compte (Démo ou Réel).
+            </p>
+          </div>
+          <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800">
+            <div className="font-semibold text-slate-900 dark:text-slate-100">
+              3. Lancer install_and_run.bat
+            </div>
+            <p className="text-slate-500 dark:text-slate-400 mt-1">
+              Double-cliquez sur <span className="font-mono">install_and_run.bat</span> : les dépendances s’installent et le tableau de bord s’ouvre sur <span className="font-mono">http://127.0.0.1:8765</span>.
+            </p>
+          </div>
+        </div>
+
+        {downloadNote && (
+          <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/30 text-xs text-blue-700 dark:text-blue-300">
+            {downloadNote}
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-slate-200 dark:border-slate-800">
           <label className="flex-1 min-w-[240px] max-w-md space-y-1">
